@@ -3,34 +3,30 @@ name: Alpaca Multi-Asset Bot
 on:
   workflow_dispatch:   # allows manual trigger from GitHub UI
   schedule:
-    # 1. Stock Market Schedule (Monday-Friday)
+    # 1. Stock/ETF Market Schedule (Monday-Friday)
     
-    # Premarket: every 10 min from 4:00 AM – 9:29 AM ET (9-13 UTC in standard time)
-    # NOTE: Using 9-13 UTC to cover the 4 AM to 9 AM ET range, adjusting for standard time.
+    # Premarket: every 10 min from 4:00 AM – 9:29 AM ET
     - cron: '*/10 9-13 * * 1-5'
     
-    # Regular/After Hours: every 5 min from 9:30 AM – 8:00 PM ET (14:30–1 UTC the next day)
-    # NOTE: Using 14-23,0 UTC to cover 9 AM ET to 8 PM ET.
+    # Regular/After Hours: every 5 min from 9:30 AM – 8:00 PM ET
     - cron: '*/5 14-23,0 * * 1-5' 
     
     # 2. Crypto Schedule (24/7, including weekends)
-    # Run every 5 minutes outside of the main stock market run hours.
-    # This covers nights and all weekend hours (Day of Week = 0,6)
+    # Run every 5 minutes on Saturdays and Sundays (Day of Week = 0,6)
     - cron: '*/5 * * * 0,6'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     env:
-      # CRITICAL FIX: Explicitly set the base URL to Paper API to match your working connection.
-      # Alpaca requires the /v2 suffix for the REST endpoint.
-      APCA_BASE_URL_1: 'https://paper-api.alpaca.markets'
-      
-      # Account 1 credentials (must be Paper Trading Keys)
+      # --- Credentials Loaded from Secrets (Recommended) ---
       APCA_API_KEY_1: ${{ secrets.APCA_API_KEY_1 }}
       APCA_API_SECRET_1: ${{ secrets.APCA_API_SECRET_1 }}
       
-      # Remove or comment out Account 2 if not used, to simplify:
+      # RESTORING BASE URL TO SECRET
+      APCA_BASE_URL_1: ${{ secrets.APCA_BASE_URL_1 }}
+      
+      # Remove or comment out Account 2 if not used:
       # APCA_API_KEY_2: ${{ secrets.APCA_API_KEY_2 }}
       # APCA_API_SECRET_2: ${{ secrets.APCA_API_SECRET_2 }}
       # APCA_BASE_URL_2: ${{ secrets.APCA_BASE_URL_2 }}
