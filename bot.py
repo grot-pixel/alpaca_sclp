@@ -3,6 +3,7 @@ import json
 import time
 from datetime import datetime, timezone, timedelta
 import pandas as pd
+# NOTE: Using the older alpaca-trade-api which uses REST and TimeFrame
 from alpaca_trade_api.rest import REST, TimeFrame
 
 # --- CONFIGURATION & SETUP ---
@@ -23,10 +24,12 @@ except json.JSONDecodeError:
 print("Loaded config:", cfg)
 
 # --- CONSTANTS & HELPER FUNCTIONS ---
-# Alpaca uses pairs for crypto (e.g., BTC/USD). We map the base symbol to the pair.
-# NOTE: Add all crypto symbols from your config.json here if they use the base name (e.g., "BTC")
+# Alpaca crypto symbols must be in the pair format (e.g., BTC/USD) for data and orders. 
+# We map the base symbol (from config.json) to the required Alpaca pair.
 CRYPTO_MAP = {
-    "BTC": "BTC/USD", "ETH": "ETH/USD", "DOGE": "DOGE/USD", 
+    "BTC": "BTC/USD", 
+    "ETH": "ETH/USD", 
+    "DOGE": "DOGE/USD", 
     "SOL": "SOL/USD", 
 }
 CRYPTO_SYMBOLS = set(CRYPTO_MAP.keys())
@@ -72,10 +75,11 @@ def is_regular_market_open(api: REST) -> bool:
     """Checks if the US equity market is within regular hours (9:30 AM - 4:00 PM ET)."""
     try:
         clock = api.get_clock()
-        return clock.is_open
+        # This check is sufficient to determine if stock entry orders can be placed
+        return clock.is_open 
     except Exception as e:
         print(f"Error checking market clock: {e}")
-        return True # Default to True to allow crypto/weekend checks to proceed
+        return False
 
 
 # --- MAIN TRADING LOGIC ---
@@ -100,7 +104,7 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
         alpaca_sym = CRYPTO_MAP.get(sym, sym)
         is_crypto = sym in CRYPTO_SYMBOLS
         
-        # We trade if the stock market is open OR if the asset is crypto
+        # We trade stocks/ETFs if the stock market is open, but we trade crypto 24/7
         is_tradable_now = market_open or is_crypto
         
         # Check if the asset is a stock/ETF but the market is closed
@@ -112,7 +116,7 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
             # A. Get Market Data (5-Minute Bars)
             required_limit = max(cfg["sma_slow"], cfg["rsi_period"]) + 2 
             
-            # Fetch 5-minute bars ('5Min' is the correct string for 5-minute aggregation in alpaca_trade_api)
+            # Fetch 5-minute bars ('5Min' is the correct string for 5-minute aggregation)
             bars = api.get_bars(alpaca_sym, '5Min', limit=required_limit).df 
             
             if bars.empty or len(bars) < required_limit:
@@ -125,7 +129,7 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
             
             # C. Check for Existing Position/Open Orders
             try:
-                # Bracket orders handle TP/SL, so we only need to manage open entries/existing positions
+                # Bracket orders handle TP/SL. We manage open entries/existing positions
                 open_orders = api.list_orders(status='open', symbols=[alpaca_sym])
                 position_qty = float(api.get_position(alpaca_sym).qty)
             except Exception:
@@ -204,16 +208,17 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
 accounts = []
 key = os.getenv("APCA_API_KEY_1")
 secret = os.getenv("APCA_API_SECRET_1")
-# For production, we default to the live URL if the env var isn't set, but expect it to be set.
-base = os.getenv("APCA_BASE_URL_1") or "https://api.alpaca.markets" 
+# **FIXED:** Defaulting back to the Paper Trading URL, matching your original connection.
+base = os.getenv("APCA_BASE_URL_1") or "https://paper-api.alpaca.markets" 
 
 if key and secret:
     try:
         api = REST(key, secret, base)
         api.get_account()
-        print("Account connected successfully to LIVE API.")
+        # NOTE: Changing the print statement to reflect the successful connection to the Paper API
+        print(f"Account connected successfully to Paper API at {base}.")
         accounts.append({
-            "name": "LiveAccount1",
+            "name": "PaperAccount1",
             "api": api,
             "symbols": cfg["symbols"]
         })
