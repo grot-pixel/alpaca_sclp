@@ -3,12 +3,11 @@ import json
 import time
 from datetime import datetime, timezone, timedelta
 import pandas as pd
-# NOTE: Using the older alpaca-trade-api which uses REST and TimeFrame
 from alpaca_trade_api.rest import REST, TimeFrame
 
 # --- CONFIGURATION & SETUP ---
 CONFIG_FILE = "config.json"
-cfg = {} # Initialize cfg as an empty dict
+cfg = {}
 
 try:
     with open(CONFIG_FILE) as f:
@@ -24,8 +23,8 @@ except json.JSONDecodeError:
 print("Loaded config:", cfg)
 
 # --- CONSTANTS & HELPER FUNCTIONS ---
-# Alpaca crypto symbols must be in the pair format (e.g., BTC/USD) for data and orders. 
-# We map the base symbol (from config.json) to the required Alpaca pair.
+# Alpaca crypto symbols must be in the pair format (e.g., BTC/USD) for orders. 
+# We map the base symbol (from config.json) to the required Alpaca pair for orders.
 CRYPTO_MAP = {
     "BTC": "BTC/USD", 
     "ETH": "ETH/USD", 
@@ -33,6 +32,16 @@ CRYPTO_MAP = {
     "SOL": "SOL/USD", 
 }
 CRYPTO_SYMBOLS = set(CRYPTO_MAP.keys())
+
+def get_alpaca_data_sym(sym_from_config):
+    """Returns the symbol format needed for the get_bars call (prefers base symbol for crypto data)."""
+    if sym_from_config in CRYPTO_SYMBOLS:
+        return sym_from_config # e.g., returns "BTC" for data retrieval
+    return sym_from_config # e.g., returns "AAPL"
+
+def get_alpaca_order_sym(sym_from_config):
+    """Returns the symbol format needed for the submit_order call (requires pair for crypto orders)."""
+    return CRYPTO_MAP.get(sym_from_config, sym_from_config) # e.g., returns "BTC/USD" for orders
 
 def rsi(series: pd.Series, period: int = 14):
     """Calculates the Relative Strength Index (RSI)."""
@@ -75,7 +84,6 @@ def is_regular_market_open(api: REST) -> bool:
     """Checks if the US equity market is within regular hours (9:30 AM - 4:00 PM ET)."""
     try:
         clock = api.get_clock()
-        # This check is sufficient to determine if stock entry orders can be placed
         return clock.is_open 
     except Exception as e:
         print(f"Error checking market clock: {e}")
@@ -100,8 +108,9 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
 
     # 3. Process each symbol
     for sym in symbols:
-        # Determine the Alpaca symbol format (e.g., "BTC" -> "BTC/USD")
-        alpaca_sym = CRYPTO_MAP.get(sym, sym)
+        # Determine the symbol formats for data and orders
+        alpaca_data_sym = get_alpaca_data_sym(sym)
+        alpaca_order_sym = get_alpaca_order_sym(sym)
         is_crypto = sym in CRYPTO_SYMBOLS
         
         # We trade stocks/ETFs if the stock market is open, but we trade crypto 24/7
@@ -116,11 +125,11 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
             # A. Get Market Data (5-Minute Bars)
             required_limit = max(cfg["sma_slow"], cfg["rsi_period"]) + 2 
             
-            # Fetch 5-minute bars ('5Min' is the correct string for 5-minute aggregation)
-            bars = api.get_bars(alpaca_sym, '5Min', limit=required_limit).df 
+            # Use alpaca_data_sym (e.g., "BTC") for data retrieval
+            bars = api.get_bars(alpaca_data_sym, '5Min', limit=required_limit).df 
             
             if bars.empty or len(bars) < required_limit:
-                print(f"[{sym}] Skipping: Not enough 5Min data ({len(bars)}/{required_limit})")
+                print(f"[{sym}] Skipping: Not enough 5Min data ({len(bars)}/{required_limit}) for {alpaca_data_sym}")
                 continue
             
             # B. Generate Signal
@@ -129,11 +138,10 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
             
             # C. Check for Existing Position/Open Orders
             try:
-                # Bracket orders handle TP/SL. We manage open entries/existing positions
-                open_orders = api.list_orders(status='open', symbols=[alpaca_sym])
-                position_qty = float(api.get_position(alpaca_sym).qty)
+                # Use alpaca_order_sym (e.g., "BTC/USD") for position/order checks
+                open_orders = api.list_orders(status='open', symbols=[alpaca_order_sym])
+                position_qty = float(api.get_position(alpaca_order_sym).qty)
             except Exception:
-                # Assume no open position/order if fetching position/orders fails
                 open_orders = []
                 position_qty = 0
 
@@ -163,11 +171,12 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
                     
                     print(f"[{sym}] Signal: BUY ({reason}). QTY: {final_qty} @ ${current_price:.2f}. TP: ${take_profit_price:.2f}, SL: ${stop_loss_price:.2f}")
 
+                    # Use alpaca_order_sym (e.g., "BTC/USD") for order submission
                     api.submit_order(
-                        symbol=alpaca_sym,
+                        symbol=alpaca_order_sym,
                         qty=final_qty,
                         side='buy',
-                        type='limit', # Use limit to ensure price fill
+                        type='limit', 
                         time_in_force='day', 
                         limit_price=current_price,
                         order_class='bracket',
@@ -179,17 +188,16 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
                     print(f"[{sym}] Signal: BUY ({reason}). Position: {position_qty}, Open Orders: {len(open_orders)}. Skipping entry.")
             
             elif signal == "sell" and position_qty > 0:
-                # This 'sell' signal acts as a market exit override (e.g., trend reversal).
+                # Market exit override signal.
                 
-                # First, cancel all open bracket/contingent orders to release position funds
                 if open_orders:
                     for order in open_orders:
                         api.cancel_order(order.id)
                     print(f"[{sym}] Canceled {len(open_orders)} open contingent orders.")
                 
-                # Sell the entire position immediately
+                # Use alpaca_order_sym for closing position
                 print(f"[{sym}] Signal: SELL ({reason}). Closing position of {position_qty} shares/units @ ${current_price:.2f}")
-                api.submit_order(alpaca_sym, position_qty, 'sell', 'market', 'day')
+                api.submit_order(alpaca_order_sym, position_qty, 'sell', 'market', 'day')
                 print(f"[{sym}] Market Order submitted: SELL {position_qty}.")
                 
             else:
@@ -201,21 +209,21 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
                              print(f"[{sym}] CANCELED stale limit BUY order: {order.id}")
                 
         except Exception as e:
-            print(f"[{sym}] ❌ Error processing symbol: {e}")
+            # Print the data symbol used in the failing call for better debugging
+            print(f"[{sym}] ❌ Error processing symbol ({alpaca_data_sym}): {e}")
 
 
 # --- INITIALIZATION AND EXECUTION ---
 accounts = []
 key = os.getenv("APCA_API_KEY_1")
 secret = os.getenv("APCA_API_SECRET_1")
-# **FIXED:** Defaulting back to the Paper Trading URL, matching your original connection.
+# Defaulting back to the Paper Trading URL, as this is where your keys worked.
 base = os.getenv("APCA_BASE_URL_1") or "https://paper-api.alpaca.markets" 
 
 if key and secret:
     try:
         api = REST(key, secret, base)
         api.get_account()
-        # NOTE: Changing the print statement to reflect the successful connection to the Paper API
         print(f"Account connected successfully to Paper API at {base}.")
         accounts.append({
             "name": "PaperAccount1",
@@ -229,7 +237,6 @@ if not accounts:
     print("No accounts connected. Exiting.")
 else:
     for account_data in accounts:
-        # Cancel any open orders before starting to ensure a clean slate 
         try:
             api.cancel_all_orders()
             print("\nCanceled all previous open orders.")
