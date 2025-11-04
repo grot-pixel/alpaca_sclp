@@ -7,33 +7,27 @@ from alpaca_trade_api.rest import REST, TimeFrame
 
 # --- CONFIGURATION & SETUP ---
 CONFIG_FILE = "config.json"
+cfg = {} # Initialize cfg as an empty dict
+
 try:
     with open(CONFIG_FILE) as f:
-        # Load the recommended scalping parameters
-        cfg = {
-          "symbols": ["AAPL", "ABAT", "AMD", "BTC", "COIN", "DOGE", "ETH", "MARA", "MP", "MSTR", "NVDA", "NVDL", "RIOT", "SOL", "SOXL", "SOXS", "SPXL", "SPXU", "SQQQ", "TQQQ", "TSLA", "TSLL", "UUUU"], 
-          "max_position_pct": 0.10,
-          "max_trade_pct": 0.05,
-          "stop_loss_pct": 0.005,  # 0.5%
-          "take_profit_pct": 0.01, # 1.0%
-          "rsi_period": 9,
-          "rsi_overbought": 70,
-          "rsi_oversold": 30,
-          "sma_fast": 5,
-          "sma_slow": 13
-        }
-    # NOTE: In a production environment, you should load the config from disk:
-    # with open(CONFIG_FILE) as f: cfg = json.load(f)
-    print("Using Recommended Scalping Config:", cfg)
+        cfg = json.load(f)
+    print("Loaded configuration from config.json.")
 except FileNotFoundError:
-    print(f"Error: {CONFIG_FILE} not found. Ensure it's in the same directory.")
+    print(f"Error: {CONFIG_FILE} not found. Please create this file with your trading parameters.")
     exit()
+except json.JSONDecodeError:
+    print(f"Error: Could not parse {CONFIG_FILE}. Ensure it is valid JSON.")
+    exit()
+
+print("Loaded config:", cfg)
 
 # --- CONSTANTS & HELPER FUNCTIONS ---
 # Alpaca uses pairs for crypto (e.g., BTC/USD). We map the base symbol to the pair.
+# NOTE: Add all crypto symbols from your config.json here if they use the base name (e.g., "BTC")
 CRYPTO_MAP = {
     "BTC": "BTC/USD", "ETH": "ETH/USD", "DOGE": "DOGE/USD", 
-    "SOL": "SOL/USD", "COIN": "COIN",  # COIN is a stock, but included for context
+    "SOL": "SOL/USD", 
 }
 CRYPTO_SYMBOLS = set(CRYPTO_MAP.keys())
 
@@ -113,11 +107,7 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
         if not is_tradable_now and not is_crypto:
              print(f"[{sym}] Skipping: Stock market closed.")
              continue
-        elif not is_tradable_now and is_crypto:
-            # Should not happen with the logic above, but safety check
-            print(f"[{sym}] Skipping: Crypto symbol but somehow not tradable.")
-            continue
-
+        
         try:
             # A. Get Market Data (5-Minute Bars)
             required_limit = max(cfg["sma_slow"], cfg["rsi_period"]) + 2 
@@ -158,7 +148,6 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
                 qty_to_add = remaining_buy_power / current_price
                 
                 # Determine final integer quantity to buy
-                # We use max(0, int(...)) to handle fractional crypto units safely, though Alpaca supports fractional shares
                 final_qty = max(0, int(min(qty_to_buy, qty_to_add))) 
 
                 if position_qty == 0 and final_qty > 0 and not open_orders:
@@ -186,8 +175,7 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
                     print(f"[{sym}] Signal: BUY ({reason}). Position: {position_qty}, Open Orders: {len(open_orders)}. Skipping entry.")
             
             elif signal == "sell" and position_qty > 0:
-                # Our primary exit is the bracket order. This 'sell' signal acts as a market exit override.
-                # E.g., if you want to exit due to a massive trend reversal signal.
+                # This 'sell' signal acts as a market exit override (e.g., trend reversal).
                 
                 # First, cancel all open bracket/contingent orders to release position funds
                 if open_orders:
@@ -201,10 +189,8 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
                 print(f"[{sym}] Market Order submitted: SELL {position_qty}.")
                 
             else:
-                # Check if we have an open order that needs canceling if signal changed
+                # If no signal, cancel any stale limit buy orders
                 if open_orders:
-                    # Cancel any limit buy orders that haven't filled if the signal is no longer 'buy'
-                    # In a high-frequency bot, you usually cancel if the signal is gone.
                     for order in open_orders:
                         if order.side == 'buy' and order.type == 'limit':
                              api.cancel_order(order.id)
@@ -216,18 +202,18 @@ def trade_strategy(account_name: str, api: REST, symbols: list):
 
 # --- INITIALIZATION AND EXECUTION ---
 accounts = []
-# NOTE: Removed the loop and simplified to a single account for conciseness.
 key = os.getenv("APCA_API_KEY_1")
 secret = os.getenv("APCA_API_SECRET_1")
-base = os.getenv("APCA_BASE_URL_1") or "https://paper-api.alpaca.markets"
+# For production, we default to the live URL if the env var isn't set, but expect it to be set.
+base = os.getenv("APCA_BASE_URL_1") or "https://api.alpaca.markets" 
 
 if key and secret:
     try:
         api = REST(key, secret, base)
         api.get_account()
-        print("Account connected successfully.")
+        print("Account connected successfully to LIVE API.")
         accounts.append({
-            "name": "PaperAccount1",
+            "name": "LiveAccount1",
             "api": api,
             "symbols": cfg["symbols"]
         })
@@ -238,14 +224,13 @@ if not accounts:
     print("No accounts connected. Exiting.")
 else:
     for account_data in accounts:
-        # Cancel any open orders before starting to ensure a clean slate (optional, but good practice)
-        api.cancel_all_orders()
-        print("\nCanceled all previous open orders.")
+        # Cancel any open orders before starting to ensure a clean slate 
+        try:
+            api.cancel_all_orders()
+            print("\nCanceled all previous open orders.")
+        except Exception as e:
+            print(f"Error canceling orders: {e}")
+            
         trade_strategy(account_data["name"], account_data["api"], account_data["symbols"])
     
     print("\nTrading bot run complete.")
-
-This code now uses Alpaca's robust **Bracket Order** functionality, which is the industry standard for automated systems that need reliable, simultaneous Take-Profit and Stop-Loss orders, and it properly manages the **24/7 nature of your crypto assets** for continuous trading.
-
-[Bracket Orders with Alpaca Trading API in Python Gotchas](https://www.youtube.com/watch?v=w4PMHz7FR_A) provides a detailed look at how to properly manage bracket orders, which are essential for your new bot.
-http://googleusercontent.com/youtube_content/0
