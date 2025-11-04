@@ -1,25 +1,40 @@
-name: Alpaca Multi-Account Bot
+name: Alpaca Multi-Asset Bot
 
 on:
   workflow_dispatch:   # allows manual trigger from GitHub UI
   schedule:
-    # Premarket: every 10 min from 4:00 AM – 9:29 AM ET (8–13 UTC)
-    - cron: '*/10 8-12 * * 1-5'
-    # Regular Market Hours: every 5 min from 9:30 AM – 4:00 PM ET (13:30–20:00 UTC)
-    - cron: '*/5 13-20 * * 1-5'
+    # 1. Stock Market Schedule (Monday-Friday)
+    
+    # Premarket: every 10 min from 4:00 AM – 9:29 AM ET (9-13 UTC in standard time)
+    # NOTE: Using 9-13 UTC to cover the 4 AM to 9 AM ET range, adjusting for standard time.
+    - cron: '*/10 9-13 * * 1-5'
+    
+    # Regular/After Hours: every 5 min from 9:30 AM – 8:00 PM ET (14:30–1 UTC the next day)
+    # NOTE: Using 14-23,0 UTC to cover 9 AM ET to 8 PM ET.
+    - cron: '*/5 14-23,0 * * 1-5' 
+    
+    # 2. Crypto Schedule (24/7, including weekends)
+    # Run every 5 minutes outside of the main stock market run hours.
+    # This covers nights and all weekend hours (Day of Week = 0,6)
+    - cron: '*/5 * * * 0,6'
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     env:
-      # Account 1 credentials
+      # CRITICAL FIX: Explicitly set the base URL to Paper API to match your working connection.
+      # Alpaca requires the /v2 suffix for the REST endpoint.
+      APCA_BASE_URL_1: 'https://paper-api.alpaca.markets'
+      
+      # Account 1 credentials (must be Paper Trading Keys)
       APCA_API_KEY_1: ${{ secrets.APCA_API_KEY_1 }}
       APCA_API_SECRET_1: ${{ secrets.APCA_API_SECRET_1 }}
-      APCA_BASE_URL_1: ${{ secrets.APCA_BASE_URL_1 }}
-      # Account 2 credentials
-      APCA_API_KEY_2: ${{ secrets.APCA_API_KEY_2 }}
-      APCA_API_SECRET_2: ${{ secrets.APCA_API_SECRET_2 }}
-      APCA_BASE_URL_2: ${{ secrets.APCA_BASE_URL_2 }}
+      
+      # Remove or comment out Account 2 if not used, to simplify:
+      # APCA_API_KEY_2: ${{ secrets.APCA_API_KEY_2 }}
+      # APCA_API_SECRET_2: ${{ secrets.APCA_API_SECRET_2 }}
+      # APCA_BASE_URL_2: ${{ secrets.APCA_BASE_URL_2 }}
+      
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
