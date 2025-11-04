@@ -1,33 +1,27 @@
 {
   "symbols": [
-    // --- Tech & Popular Stocks (Market Hours Only) ---
     "AAPL", 
     "AMD", 
     "NVDA", 
     "TSLA", 
-    "COIN", // Coinbase (Proxy for crypto)
-    "MSTR", // MicroStrategy (Proxy for BTC exposure)
-    
-    // --- Leveraged ETFs (High Volatility, Market Hours Only) ---
-    "TQQQ",  // 3x Nasdaq 100 Bull
-    "SQQQ",  // 3x Nasdaq 100 Bear
-    "SOXL",  // 3x Semiconductors Bull
-    "SOXS",  // 3x Semiconductors Bear
-    "SPXL",  // 3x S&P 500 Bull
-    "SPXU",  // 3x S&P 500 Bear
-    
-    // --- Core Cryptos (24/7 Trading) ---
-    "BTC",   // Bitcoin
-    "ETH",   // Ethereum
-    "SOL",   // Solana
-    "DOGE"   // Dogecoin
+    "COIN", 
+    "MSTR", 
+    "TQQQ",  
+    "SQQQ",  
+    "SOXL",  
+    "SOXS",  
+    "SPXL",  
+    "SPXU",  
+    "BTC",   
+    "ETH",   
+    "SOL",   
+    "DOGE"
   ], 
   "max_position_pct": 0.10,
   "max_trade_pct": 0.05,
   "stop_loss_pct": 0.005,
   "take_profit_pct": 0.01,
   
-  // --- Indicator Parameters ---
   "rsi_period": 9,
   "rsi_overbought": 70,
   "rsi_oversold": 30,
