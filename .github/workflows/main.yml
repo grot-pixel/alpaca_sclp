@@ -2,25 +2,30 @@ name: Aggressive Alpaca Trader
 
 on:
   schedule:
+    # Runs every 5 minutes during market hours (approx)
     - cron: '*/5 * * * 1-5'
   workflow_dispatch:
 
 jobs:
-  trade:
+  run-trader:
     runs-on: ubuntu-latest
     timeout-minutes: 5
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Changed to v4 for compatibility
 
-      - name: Set up Python 3.12
+      - name: Setup Python 3.12 and Install Dependencies 🐍
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
+          cache: 'pip' # Use pip cache for faster dependency install
 
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+      - name: Install Python Packages
+        # This step explicitly runs pip install in the correct environment
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Execute Trading Bot
         env:
