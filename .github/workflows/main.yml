@@ -2,28 +2,27 @@ name: Aggressive Alpaca Trader
 
 on:
   schedule:
-    # Runs every 5 minutes during market hours (approx)
     - cron: '*/5 * * * 1-5'
   workflow_dispatch:
 
 jobs:
-  run-trader:
+  trade:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.12'
 
       - name: Install Dependencies
         run: pip install -r requirements.txt
 
-      - name: Run Trading Bot
+      - name: Execute Trading Bot
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
