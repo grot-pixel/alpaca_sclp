@@ -1,17 +1,16 @@
-# Alpaca Micro-Scalp Trading Bot
+# Alpaca Micro-Scalp Trading Bot (PAPER-default)
 
-**WARNING: HIGH RISK** — This bot is an educational/scaffolding example. Always run in PAPER mode first.
+**IMPORTANT: This repo is configured to default to PAPER mode.** That prevents accidental live trading.
 
-## Quick start
-1. Create a GitHub repo (public if you want free GitHub Actions minutes), add these files.
-2. Put Alpaca API keys as GitHub Secrets:
+## Setup
+1. Add these GitHub Secrets to your repo:
    - `APCA_API_KEY_1`
    - `APCA_API_SECRET_1`
-   - `APCA_BASE_URL_1` (optional; use Alpaca paper URL for paper trading)
-3. Edit `config.json` for symbols, sizes, slippage, and risk limits.
-4. Use the included GitHub Actions workflow to run a one-shot scan every 5 minutes (`.github/workflows/trigger.yml`).
-   - Note: Frequent Actions runs consume CI minutes; public repos have free minutes for Actions.
-5. Alternatively run locally:
+   - `APCA_BASE_URL_1` (optional; if you provide it and it contains "paper" we'll stay in paper; nonetheless default is PAPER)
+
+2. Edit `config.json` if needed. Ensure it is valid JSON (no trailing commas).
+
+3. Use the GitHub workflow (every 5 minutes) or run locally:
    ```bash
    export APCA_API_KEY_1="..."
    export APCA_API_SECRET_1="..."
