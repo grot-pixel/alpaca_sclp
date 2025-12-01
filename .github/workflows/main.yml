@@ -24,15 +24,17 @@ jobs:
           cache: 'pip'
 
       - name: Install Python Packages
-        # This installs alpaca-py into the venv
+        # This installs all packages from requirements.txt into the venv
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Execute Trading Bot
         env:
-          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
-          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
-        # CRITICAL FIX: We explicitly tell the runner to use the Python interpreter 
-        # from the virtual environment (venv) created by the setup-python action.
+          # --- CRITICAL: Passing your custom keys as environment variables ---
+          APCA_API_KEY_1: ${{ secrets.APCA_API_KEY_1 }}
+          APCA_API_SECRET_1: ${{ secrets.APCA_API_SECRET_1 }}
+          APCA_BASE_URL_1: ${{ secrets.APCA_BASE_URL_1 }}
+        # CRITICAL FIX: Explicitly run the script using the Python interpreter 
+        # from the virtual environment to ensure all packages are found.
         run: ${{ env.pythonLocation }}/bin/python main.py
