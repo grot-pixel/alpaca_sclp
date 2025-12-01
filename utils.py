@@ -1,5 +1,6 @@
 # utils.py
-import logging, time, os
+import logging
+import time
 
 def setup_logging(level="INFO"):
     logging.basicConfig(format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
