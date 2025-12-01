@@ -33,22 +33,26 @@ USD_PER_TRADE = config['RISK_MANAGEMENT']['USD_PER_TRADE']
 # Read user's custom environment variables
 api_key = os.getenv('APCA_API_KEY_1')
 api_secret = os.getenv('APCA_API_SECRET_1')
+# base_url is read but not used for client init (SDK handles it)
 base_url = os.getenv('APCA_BASE_URL_1')
 
 # Basic check for authentication
 if not api_key or not api_secret:
     raise ValueError("Missing APCA_API_KEY_1 or APCA_API_SECRET_1. Check your GitHub Secrets.")
 
-# Initialize the clients. Use url_override if provided by the user.
+# CRITICAL FIX: Determine paper/live mode based on the key type or URL.
 if base_url:
-    # Use explicit base_url (e.g., https://api.alpaca.markets or https://paper-api.alpaca.markets)
-    trade_client = TradingClient(api_key, api_secret, url_override=base_url)
-    data_client = StockHistoricalDataClient(api_key, api_secret, url_override=base_url)
+    # Use base_url to determine paper/live if it was provided
+    paper_mode = 'paper' in base_url
 else:
-    # Fallback to default paper/live detection based on key type if no URL is specified
+    # Use default paper/live detection based on key type
     paper_mode = 'paper' in api_key.lower()
-    trade_client = TradingClient(api_key, api_secret, paper=paper_mode)
-    data_client = StockHistoricalDataClient(api_key, api_secret)
+
+# Initialize the clients using the simple 'paper' flag. 
+# This tells the SDK to use the correct data and trading URLs automatically, 
+# resolving the "Not Found" error.
+trade_client = TradingClient(api_key, api_secret, paper=paper_mode)
+data_client = StockHistoricalDataClient(api_key, api_secret, paper=paper_mode)
 
 
 def get_data(symbol):
@@ -78,6 +82,7 @@ def get_data(symbol):
             
         return df
     except Exception as e:
+        # The "Not Found" error is caught here if the market is closed or URL is wrong.
         print(f"[{symbol}] Data fetch failed: {e}")
         return None
 
@@ -164,7 +169,6 @@ def run_trading_cycle():
         if not clock.is_open:
             print("Market Closed. (Note: Crypto markets may be open 24/7).")
     except Exception as e:
-        # Graceful handling if clock check fails (e.g., API is temporarily down)
         print(f"Warning: Failed to retrieve market clock status: {e}")
 
     # Check Active Positions
