@@ -1,5 +1,6 @@
 # order_manager.py
-import time, uuid, logging
+import logging
+import uuid
 from decimal import Decimal
 from alpaca_client import place_limit_order, get_latest_quote
 from utils import now_ts
@@ -7,7 +8,10 @@ from utils import now_ts
 logger = logging.getLogger(__name__)
 
 def marketable_limit_price(side, last_trade_price, slippage_pct, limit_offset_ticks):
-    """Compute a marketable limit price that attempts to get filled but protects from adverse slippage."""
+    """
+    Compute a marketable limit price near last_trade_price that biases toward being filled
+    but protects from worst-case slippage.
+    """
     price = Decimal(str(last_trade_price))
     offset = Decimal(str(slippage_pct))
     tick = Decimal(str(limit_offset_ticks))
@@ -15,20 +19,19 @@ def marketable_limit_price(side, last_trade_price, slippage_pct, limit_offset_ti
         target = price * (1 + offset) + tick
     else:
         target = price * (1 - offset) - tick
-    # round to 4 decimals to be safe for US equities
     return float(round(target, 4))
 
 def submit_scalp_order(symbol, qty, side, target_pct, slippage_pct, bracket=True, limit_offset_ticks=0.0):
     """
-    Submit a marketable limit order sized to qty, with bracket TP/SL if bracket=True.
-    Returns the order object returned by Alpaca or None.
+    Submit a limit (marketable) or bracket order with TP/SL.
+    Returns Alpaca order object or None.
     """
     quote = get_latest_quote(symbol)
     if not quote:
         logger.warning("No quote available for %s", symbol)
         return None
 
-    # try to get a usable last trade price; fall back to ask/bid if necessary
+    # obtain price (last trade preferred)
     last_price = None
     if hasattr(quote, 'last') and quote.last and getattr(quote.last, "price", None):
         last_price = quote.last.price
@@ -42,10 +45,9 @@ def submit_scalp_order(symbol, qty, side, target_pct, slippage_pct, bracket=True
     limit_price = marketable_limit_price(side, last_price, slippage_pct, limit_offset_ticks)
     client_order_id = f"scalp-{symbol}-{now_ts()}-{uuid.uuid4().hex[:6]}"
 
-    # compute take profit and stop loss relative to limit price
     if side.lower() == "buy":
         take = limit_price * (1 + target_pct)
-        stop = limit_price * (1 - (target_pct * 2))  # default wider stop
+        stop = limit_price * (1 - (target_pct * 2))
         try:
             order = place_limit_order(symbol, qty, "buy", limit_price, order_class="bracket",
                                       take_profit=take, stop_loss=stop, client_order_id=client_order_id)
