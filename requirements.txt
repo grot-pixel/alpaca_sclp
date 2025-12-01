@@ -1,5 +1,0 @@
-alpaca-py
-pandas
-pandas_ta
-numpy
-pytz
