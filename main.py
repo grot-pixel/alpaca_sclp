@@ -1,148 +1,162 @@
 import alpaca_trade_api as tradeapi
 import pandas as pd
 import pandas_ta as ta
+import json
 import os
-import time
 import math
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime
 import pytz
 
-# --- CONFIGURATION ---
-# Aggressive Tech & Crypto-related stocks for high volatility
-SYMBOLS = ['NVDA', 'TSLA', 'AMD', 'COIN', 'MARA', 'PLTR', 'SOXL', 'TQQQ', 'MSTR']
-TARGET_GAIN_PER_TRADE = 0.005  # 0.5%
-STOP_LOSS_PCT = 0.015          # 1.5% (Wider stop to prevent shakeouts in volatile markets)
-MAX_POSITIONS = 5              # Max concurrent trades to manage risk
-USD_PER_TRADE = 2000           # Amount to bet per trade (Adjust based on your equity)
-TIMEFRAME = '5Min'             # Fast timeframe
+# --- LOAD CONFIGURATION ---
+try:
+    with open('config.json', 'r') as f:
+        config = json.load(f)
+except FileNotFoundError:
+    print("CRITICAL ERROR: config.json not found. Exiting.")
+    sys.exit(1)
+
+# Extract config variables
+SYMBOLS = config['SYMBOLS']
+TARGET_GAIN = config['RISK_MANAGEMENT']['TARGET_GAIN_PCT']
+STOP_LOSS = config['RISK_MANAGEMENT']['STOP_LOSS_PCT']
+MAX_POSITIONS = config['RISK_MANAGEMENT']['MAX_CONCURRENT_POSITIONS']
+USD_PER_TRADE = config['RISK_MANAGEMENT']['USD_PER_TRADE']
+TIMEFRAME = config['SYSTEM']['TIMEFRAME']
 
 # --- API CONNECTION ---
+# Checks if running in Paper or Live mode based on Key format
+BASE_URL = 'https://paper-api.alpaca.markets' if 'paper' in os.getenv('APCA_API_KEY_ID', '').lower() else 'https://api.alpaca.markets'
+
 api = tradeapi.REST(
     os.getenv('APCA_API_KEY_ID'),
     os.getenv('APCA_API_SECRET_KEY'),
-    base_url='https://paper-api.alpaca.markets' if 'paper' in os.getenv('APCA_API_KEY_ID', '').lower() else 'https://api.alpaca.markets',
+    base_url=BASE_URL,
     api_version='v2'
 )
 
-def get_market_status():
-    clock = api.get_clock()
-    return clock.is_open
-
 def get_data(symbol):
+    """Fetch recent market data for analysis."""
     try:
-        # Get enough data for indicators
+        # Fetching 100 bars to ensure indicators have warmup data
         bars = api.get_bars(symbol, TIMEFRAME, limit=100, adjustment='raw').df
-        if bars.empty:
-            return None
+        if bars.empty: return None
         return bars
     except Exception as e:
-        print(f"Error fetching data for {symbol}: {e}")
+        print(f"[{symbol}] Data fetch failed: {e}")
         return None
 
-def analyze(df):
-    # Aggressive Strategy: RSI + Bollinger Bands
-    # We want to catch momentum or rapid reversals
-    
-    # Calculate Indicators
+def analyze_market(df):
+    """
+    Aggressive Technical Analysis
+    Returns: 'BUY', 'SELL', or None
+    """
+    # Calculate RSI
     df['RSI'] = ta.rsi(df['close'], length=14)
+    
+    # Calculate Bollinger Bands
     bb = ta.bbands(df['close'], length=20, std=2)
     df = pd.concat([df, bb], axis=1)
     
-    # Rename BB columns for clarity
-    df.rename(columns={
-        'BBL_20_2.0': 'bb_lower',
-        'BBM_20_2.0': 'bb_mid',
-        'BBU_20_2.0': 'bb_upper'
-    }, inplace=True)
+    # Define columns dynamically from pandas_ta output
+    # Usually: BBL_20_2.0, BBM_20_2.0, BBU_20_2.0
+    lower_band = df[f'BBL_20_2.0']
+    upper_band = df[f'BBU_20_2.0']
 
     current = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    signal = None
     
-    # LOGIC 1: Oversold Bounce (Aggressive Buy)
-    # Price touched lower band and RSI is oversold (<30) turning up
-    if current['close'] < current['bb_lower'] and current['RSI'] < 30:
-        signal = 'BUY'
-        print(f"Signal DETECTED: {signal} (Oversold Bounce)")
+    # STRATEGY 1: Oversold Reversal (Sniper Entry)
+    # Price is below lower band AND RSI is crushed (<30)
+    if current['close'] < current[lower_band.name] and current['RSI'] < config['SYSTEM']['RSI_OVERSOLD']:
+        return 'BUY'
 
-    # LOGIC 2: Momentum Breakout
-    # Price broke upper band and RSI is strong but not exhausted (50 < RSI < 70)
-    elif current['close'] > current['bb_upper'] and 50 < current['RSI'] < 75:
-        signal = 'BUY'
-        print(f"Signal DETECTED: {signal} (Momentum Breakout)")
+    # STRATEGY 2: Momentum Surge (Trend Following)
+    # Price broke upper band AND RSI indicates strength but not total exhaustion
+    if current['close'] > current[upper_band.name] and \
+       config['SYSTEM']['RSI_MOMENTUM_MIN'] < current['RSI'] < config['SYSTEM']['RSI_MOMENTUM_MAX']:
+        return 'BUY'
 
-    return signal, current['close']
+    return None
 
-def execute_trade(symbol, price):
-    # Check buying power
+def execute_bracket_order(symbol, price):
+    """Submits a smart OTOCO (One-Triggers-One-Cancels-Other) order."""
+    
+    # 1. Check liquidity/buying power
     account = api.get_account()
     buying_power = float(account.regt_buying_power)
     
     if buying_power < USD_PER_TRADE:
-        print(f"Insufficient funds for {symbol}. Skipping.")
+        print(f"SKIPPING {symbol}: Insufficient buying power (${buying_power}).")
         return
 
-    # Calculate Quantity
+    # 2. Calculate Share Count
     qty = math.floor(USD_PER_TRADE / price)
-    if qty <= 0: return
+    if qty < 1:
+        print(f"SKIPPING {symbol}: Price too high for trade size.")
+        return
 
-    # Calculate Bracket Prices
-    take_profit_price = round(price * (1 + TARGET_GAIN_PER_TRADE), 2)
-    stop_loss_price = round(price * (1 - STOP_LOSS_PCT), 2)
+    # 3. Calculate Exits
+    take_profit = round(price * (1 + TARGET_GAIN), 2)
+    stop_loss = round(price * (1 - STOP_LOSS), 2)
 
-    print(f"Executing BRACKET ORDER for {symbol} | Entry: {price} | TP: {take_profit_price} | SL: {stop_loss_price}")
+    print(f" >> EXECUTING BUY: {symbol} x {qty} @ ${price}")
+    print(f"    TARGET: ${take_profit} (+0.5%) | STOP: ${stop_loss} (-1.5%)")
 
     try:
-        # Submit OTOCO (One-Triggers-One-Cancels-Other) Order
-        # This is CRITICAL for GitHub Actions: The exit logic is stored on Alpaca, not your PC.
         api.submit_order(
             symbol=symbol,
             qty=qty,
             side='buy',
-            type='market', # Aggressive entry
-            time_in_force='gtc',
+            type='market',
+            time_in_force='day',
             order_class='bracket',
-            take_profit={'limit_price': take_profit_price},
-            stop_loss={'stop_price': stop_loss_price}
+            take_profit={'limit_price': take_profit},
+            stop_loss={'stop_price': stop_loss}
         )
-        print(f"Trade submitted successfully for {symbol}")
+        print(f"    SUCCESS: Bracket order placed for {symbol}.")
     except Exception as e:
-        print(f"Order failed for {symbol}: {e}")
+        print(f"    FAILED: {e}")
 
-def run_bot():
-    print(f"--- Bot Starting: {datetime.now(pytz.utc)} ---")
+def run_trading_cycle():
+    print(f"--- SCAN STARTED: {datetime.now(pytz.utc)} ---")
     
-    if not get_market_status():
-        print("Market is closed. Checking for Extended Hours capability or exiting.")
-        # Note: Regular Paper Trading often requires Market Hours. 
-        # For Real money, you can enable extended_hours=True in submit_order.
-        
-    # Check current positions to manage risk
+    # Check Market Status
+    clock = api.get_clock()
+    if not clock.is_open:
+        print("Market Closed. Scanning anyway for testing/extended hours logic (if enabled).")
+
+    # Check Active Positions
     positions = api.list_positions()
-    current_holdings = [p.symbol for p in positions]
-    
-    if len(current_holdings) >= MAX_POSITIONS:
-        print(f"Max positions reached ({len(current_holdings)}). Scanning for exits or waiting.")
-        # Since we use bracket orders, exits are automatic. We just stop buying.
+    current_symbols = [p.symbol for p in positions]
+    print(f"Current Positions: {len(current_symbols)}/{MAX_POSITIONS} {current_symbols}")
+
+    if len(current_symbols) >= MAX_POSITIONS:
+        print("Max positions reached. No new trades this cycle.")
         return
 
-    # Scan Assets
+    # Scan Watchlist
     for symbol in SYMBOLS:
-        if symbol in current_holdings:
-            print(f"Already holding {symbol}. Skipping.")
+        if symbol in current_symbols:
             continue
             
-        print(f"Scanning {symbol}...")
         df = get_data(symbol)
         if df is None: continue
         
-        signal, price = analyze(df)
+        signal = analyze_market(df)
+        current_price = df.iloc[-1]['close']
         
         if signal == 'BUY':
-            execute_trade(symbol, price)
+            print(f"SIGNAL DETECTED for {symbol}: {signal}")
+            execute_bracket_order(symbol, current_price)
+            
+            # Stop scanning if we hit max positions mid-loop
+            if len(api.list_positions()) >= MAX_POSITIONS:
+                break
+        else:
+            # Concise log for no-signal
+            pass 
 
-    print("--- Scan Complete ---")
+    print("--- SCAN COMPLETE ---")
 
 if __name__ == "__main__":
-    run_bot()
+    run_trading_cycle()
