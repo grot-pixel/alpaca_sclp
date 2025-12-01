@@ -1,6 +1,6 @@
 alpaca-py==0.43.2
-pandas
-numpy
-pytz
-tenacity
-requests
+pandas>=2.0
+numpy>=1.25
+tenacity>=8.2.0
+requests>=2.31
+python-dotenv>=1.0
