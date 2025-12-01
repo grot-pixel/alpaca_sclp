@@ -1,1 +1,31 @@
+name: Alpaca High-Freq Trader
 
+on:
+  schedule:
+    # Run every 5 minutes (GitHub Actions minimum interval)
+    - cron: '*/5 * * * 1-5'
+  workflow_dispatch: # Allows manual button click to run immediately
+
+jobs:
+  trade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5 # Kill if it hangs to save minutes
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Execute Trading Bot
+        env:
+          APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+          APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+        run: python main.py
